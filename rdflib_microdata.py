@@ -11,6 +11,7 @@ want to:
 """
 
 import microdata
+import urlparse
 
 from rdflib import URIRef, Literal, BNode, Namespace, RDF
 from rdflib.plugin import register
@@ -26,12 +27,12 @@ class MicrodataParser(Parser):
         and populate the sink graph with triples.
         """
         for item in microdata.get_items(source.getByteStream()):
-            self._add_item(item, sink)
+            self._add_item(item, sink, source.getPublicId() or source.getSystemId() or "")
 
-    def _add_item(self, item, sink):
+    def _add_item(self, item, sink, publicID):
         # the URI to hang our assertions off of
         if item.itemid:
-            s = URIRef(item.itemid.string)
+            s = URIRef(_make_absolute(item.itemid.string, publicID))
         else:
             s = BNode()
 
@@ -48,19 +49,25 @@ class MicrodataParser(Parser):
             ns = Namespace(ns + "#")
 
         # type the resource
-        sink.add((s, RDF.type, URIRef(item.itemtype)))
+        sink.add((s, RDF.type, URIRef(_make_absolute(item.itemtype, publicID))))
 
         # go through each property/value and add triples to the graph
         for item_property, item_values in item.props.items():
             p = ns[item_property]
             for v in item_values:
                 if isinstance(v, microdata.Item):
-                    o = self._add_item(v, sink) 
+                    o = self._add_item(v, sink, publicID) 
                 elif isinstance(v, microdata.URI):
-                    o = URIRef(str(v))
+                    o = URIRef(_make_absolute(unicode(v), publicID))
                 else:
                     o = Literal(v)
                 # TODO: handle dates
                 sink.add((s, p, o))
 
         return s
+
+def _make_absolute(uri, base):
+    if urlparse.urlparse(unicode(uri)).scheme:
+        return unicode(uri)
+    else:
+        return urlparse.urljoin(unicode(base), unicode(uri))
